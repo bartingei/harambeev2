@@ -16,7 +16,11 @@ import { Route as ShareIdRouteImport } from './routes/share.$id'
 import { Route as CampaignIdRouteImport } from './routes/campaign.$id'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedCreateRouteImport } from './routes/_authenticated/create'
+import { Route as ApiPublicCronRunPayoutsRouteImport } from './routes/api/public/cron/run-payouts'
 import { Route as ApiPublicCampaignImageIdRouteImport } from './routes/api/public/campaign-image.$id'
+import { Route as ApiPublicMpesaCallbackTokenRouteImport } from './routes/api/public/mpesa/callback.$token'
+import { Route as ApiPublicMpesaB2bTimeoutTokenRouteImport } from './routes/api/public/mpesa/b2b-timeout.$token'
+import { Route as ApiPublicMpesaB2bResultTokenRouteImport } from './routes/api/public/mpesa/b2b-result.$token'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -52,10 +56,33 @@ const AuthenticatedCreateRoute = AuthenticatedCreateRouteImport.update({
   path: '/create',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiPublicCronRunPayoutsRoute = ApiPublicCronRunPayoutsRouteImport.update({
+  id: '/api/public/cron/run-payouts',
+  path: '/api/public/cron/run-payouts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicCampaignImageIdRoute =
   ApiPublicCampaignImageIdRouteImport.update({
     id: '/api/public/campaign-image/$id',
     path: '/api/public/campaign-image/$id',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicMpesaCallbackTokenRoute =
+  ApiPublicMpesaCallbackTokenRouteImport.update({
+    id: '/api/public/mpesa/callback/$token',
+    path: '/api/public/mpesa/callback/$token',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicMpesaB2bTimeoutTokenRoute =
+  ApiPublicMpesaB2bTimeoutTokenRouteImport.update({
+    id: '/api/public/mpesa/b2b-timeout/$token',
+    path: '/api/public/mpesa/b2b-timeout/$token',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicMpesaB2bResultTokenRoute =
+  ApiPublicMpesaB2bResultTokenRouteImport.update({
+    id: '/api/public/mpesa/b2b-result/$token',
+    path: '/api/public/mpesa/b2b-result/$token',
     getParentRoute: () => rootRouteImport,
   } as any)
 
@@ -67,6 +94,10 @@ export interface FileRoutesByFullPath {
   '/campaign/$id': typeof CampaignIdRoute
   '/share/$id': typeof ShareIdRoute
   '/api/public/campaign-image/$id': typeof ApiPublicCampaignImageIdRoute
+  '/api/public/cron/run-payouts': typeof ApiPublicCronRunPayoutsRoute
+  '/api/public/mpesa/b2b-result/$token': typeof ApiPublicMpesaB2bResultTokenRoute
+  '/api/public/mpesa/b2b-timeout/$token': typeof ApiPublicMpesaB2bTimeoutTokenRoute
+  '/api/public/mpesa/callback/$token': typeof ApiPublicMpesaCallbackTokenRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -76,6 +107,10 @@ export interface FileRoutesByTo {
   '/campaign/$id': typeof CampaignIdRoute
   '/share/$id': typeof ShareIdRoute
   '/api/public/campaign-image/$id': typeof ApiPublicCampaignImageIdRoute
+  '/api/public/cron/run-payouts': typeof ApiPublicCronRunPayoutsRoute
+  '/api/public/mpesa/b2b-result/$token': typeof ApiPublicMpesaB2bResultTokenRoute
+  '/api/public/mpesa/b2b-timeout/$token': typeof ApiPublicMpesaB2bTimeoutTokenRoute
+  '/api/public/mpesa/callback/$token': typeof ApiPublicMpesaCallbackTokenRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -87,6 +122,10 @@ export interface FileRoutesById {
   '/campaign/$id': typeof CampaignIdRoute
   '/share/$id': typeof ShareIdRoute
   '/api/public/campaign-image/$id': typeof ApiPublicCampaignImageIdRoute
+  '/api/public/cron/run-payouts': typeof ApiPublicCronRunPayoutsRoute
+  '/api/public/mpesa/b2b-result/$token': typeof ApiPublicMpesaB2bResultTokenRoute
+  '/api/public/mpesa/b2b-timeout/$token': typeof ApiPublicMpesaB2bTimeoutTokenRoute
+  '/api/public/mpesa/callback/$token': typeof ApiPublicMpesaCallbackTokenRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -98,6 +137,10 @@ export interface FileRouteTypes {
     | '/campaign/$id'
     | '/share/$id'
     | '/api/public/campaign-image/$id'
+    | '/api/public/cron/run-payouts'
+    | '/api/public/mpesa/b2b-result/$token'
+    | '/api/public/mpesa/b2b-timeout/$token'
+    | '/api/public/mpesa/callback/$token'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -107,6 +150,10 @@ export interface FileRouteTypes {
     | '/campaign/$id'
     | '/share/$id'
     | '/api/public/campaign-image/$id'
+    | '/api/public/cron/run-payouts'
+    | '/api/public/mpesa/b2b-result/$token'
+    | '/api/public/mpesa/b2b-timeout/$token'
+    | '/api/public/mpesa/callback/$token'
   id:
     | '__root__'
     | '/'
@@ -117,6 +164,10 @@ export interface FileRouteTypes {
     | '/campaign/$id'
     | '/share/$id'
     | '/api/public/campaign-image/$id'
+    | '/api/public/cron/run-payouts'
+    | '/api/public/mpesa/b2b-result/$token'
+    | '/api/public/mpesa/b2b-timeout/$token'
+    | '/api/public/mpesa/callback/$token'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -126,6 +177,10 @@ export interface RootRouteChildren {
   CampaignIdRoute: typeof CampaignIdRoute
   ShareIdRoute: typeof ShareIdRoute
   ApiPublicCampaignImageIdRoute: typeof ApiPublicCampaignImageIdRoute
+  ApiPublicCronRunPayoutsRoute: typeof ApiPublicCronRunPayoutsRoute
+  ApiPublicMpesaB2bResultTokenRoute: typeof ApiPublicMpesaB2bResultTokenRoute
+  ApiPublicMpesaB2bTimeoutTokenRoute: typeof ApiPublicMpesaB2bTimeoutTokenRoute
+  ApiPublicMpesaCallbackTokenRoute: typeof ApiPublicMpesaCallbackTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -179,11 +234,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedCreateRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/cron/run-payouts': {
+      id: '/api/public/cron/run-payouts'
+      path: '/api/public/cron/run-payouts'
+      fullPath: '/api/public/cron/run-payouts'
+      preLoaderRoute: typeof ApiPublicCronRunPayoutsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/campaign-image/$id': {
       id: '/api/public/campaign-image/$id'
       path: '/api/public/campaign-image/$id'
       fullPath: '/api/public/campaign-image/$id'
       preLoaderRoute: typeof ApiPublicCampaignImageIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/mpesa/callback/$token': {
+      id: '/api/public/mpesa/callback/$token'
+      path: '/api/public/mpesa/callback/$token'
+      fullPath: '/api/public/mpesa/callback/$token'
+      preLoaderRoute: typeof ApiPublicMpesaCallbackTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/mpesa/b2b-timeout/$token': {
+      id: '/api/public/mpesa/b2b-timeout/$token'
+      path: '/api/public/mpesa/b2b-timeout/$token'
+      fullPath: '/api/public/mpesa/b2b-timeout/$token'
+      preLoaderRoute: typeof ApiPublicMpesaB2bTimeoutTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/mpesa/b2b-result/$token': {
+      id: '/api/public/mpesa/b2b-result/$token'
+      path: '/api/public/mpesa/b2b-result/$token'
+      fullPath: '/api/public/mpesa/b2b-result/$token'
+      preLoaderRoute: typeof ApiPublicMpesaB2bResultTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -209,6 +292,10 @@ const rootRouteChildren: RootRouteChildren = {
   CampaignIdRoute: CampaignIdRoute,
   ShareIdRoute: ShareIdRoute,
   ApiPublicCampaignImageIdRoute: ApiPublicCampaignImageIdRoute,
+  ApiPublicCronRunPayoutsRoute: ApiPublicCronRunPayoutsRoute,
+  ApiPublicMpesaB2bResultTokenRoute: ApiPublicMpesaB2bResultTokenRoute,
+  ApiPublicMpesaB2bTimeoutTokenRoute: ApiPublicMpesaB2bTimeoutTokenRoute,
+  ApiPublicMpesaCallbackTokenRoute: ApiPublicMpesaCallbackTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

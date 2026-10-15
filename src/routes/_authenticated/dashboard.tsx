@@ -5,8 +5,9 @@ import { AppHeader } from "@/components/AppHeader";
 import { ProgressBar } from "@/components/ProgressBar";
 import { formatKES } from "@/lib/campaigns";
 import { closeCampaign, extendCampaign, getOrganizerDashboard } from "@/lib/campaigns.functions";
+import { getPaymentSettings, requestPayout, savePaymentSettings } from "@/lib/payments.functions";
 import type { Campaign } from "@/lib/campaigns";
-import { Plus, CalendarPlus, CircleCheck } from "lucide-react";
+import { Plus, CalendarPlus, CircleCheck, Smartphone } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -86,6 +87,8 @@ function Dashboard() {
               <Stat label="Campaigns" value={String(data.campaigns.length)} />
               <Stat label="Donations" value={String(data.donations.length)} />
             </div>
+
+            <PaymentSetup />
 
             <h2 className="mt-8 font-display text-base font-bold">Your campaigns</h2>
             <div className="mt-3 space-y-3">
@@ -247,5 +250,112 @@ function Stat({ label, value }: { label: string; value: string }) {
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="mt-1 font-display text-sm font-bold text-foreground">{value}</p>
     </div>
+  );
+}
+
+function PaymentSetup() {
+  const fetchSettings = useServerFn(getPaymentSettings);
+  const save = useServerFn(savePaymentSettings);
+  const payout = useServerFn(requestPayout);
+  const qc = useQueryClient();
+  const { data: settings } = useQuery({
+    queryKey: ["payment-settings"],
+    queryFn: () => fetchSettings(),
+  });
+  const [till, setTill] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (!settings) return null;
+  const value = till ?? settings.tillNumber;
+  const dirty = value !== settings.tillNumber;
+
+  const payNow = async () => {
+    setBusy(true);
+    try {
+      const res = await payout();
+      await qc.invalidateQueries({ queryKey: ["payment-settings"] });
+      toast.success(res.message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't request the payout.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await save({ data: { tillNumber: value } });
+      await qc.invalidateQueries({ queryKey: ["payment-settings"] });
+      await qc.invalidateQueries({ queryKey: ["campaign"] });
+      setTill(null);
+      toast.success("Till saved. Your campaigns can take donations now.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't save your till number.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="mt-6 rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Smartphone className="h-4 w-4 text-primary" />
+          <h2 className="font-display text-base font-bold">Where donations go</h2>
+        </div>
+        <span
+          className={
+            "rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider " +
+            (settings.configured ? "bg-primary/10 text-primary" : "bg-flag-red/10 text-flag-red")
+          }
+        >
+          {settings.configured ? "Live" : "Not set up"}
+        </span>
+      </div>
+      <p className="mt-2 text-sm text-muted-foreground">
+        {settings.configured
+          ? "Donors pay by M-Pesa and what they give is paid out to your Buy Goods till."
+          : 'Add your Buy Goods till number. Until then your campaigns show "Donations open soon".'}
+      </p>
+      <form onSubmit={submit} className="mt-3 flex gap-2">
+        <input
+          value={value}
+          onChange={(e) => setTill(e.target.value)}
+          inputMode="numeric"
+          placeholder="Till number"
+          className="min-w-0 flex-1 rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary"
+        />
+        <button
+          type="submit"
+          disabled={busy || !dirty || value.trim().length < 5}
+          className="rounded-full bg-primary px-4 py-2.5 font-display text-sm font-bold text-primary-foreground disabled:opacity-50"
+        >
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </form>
+      {settings.configured && (
+        <div className="mt-3">
+          <p className="text-[11px] text-muted-foreground">
+            Waiting to be paid out: <b className="text-foreground">{formatKES(settings.owed)}</b> · On its way:{" "}
+            <b className="text-foreground">{formatKES(settings.processing)}</b> · Paid out:{" "}
+            <b className="text-foreground">{formatKES(settings.paid)}</b>
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            We pay out automatically once at least {formatKES(settings.minPayout)} is waiting.
+          </p>
+          {settings.owed >= settings.minPayout && (
+            <button
+              onClick={payNow}
+              disabled={busy}
+              className="mt-2 rounded-full border border-border px-3 py-2 text-xs font-semibold disabled:opacity-50"
+            >
+              Pay me now
+            </button>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

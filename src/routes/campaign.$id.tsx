@@ -1,14 +1,15 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AppHeader } from "@/components/AppHeader";
 import { ProgressBar } from "@/components/ProgressBar";
 import { useAuth } from "@/hooks/useAuth";
 import { categoryLabel, formatKES, type CampaignDetail as CampaignDetailData, type Category } from "@/lib/campaigns";
-import { getCampaignDetail, postCampaignUpdate, submitDonation } from "@/lib/campaigns.functions";
-import { Check, MessageCircle, Share2, X } from "lucide-react";
+import { getCampaignDetail, postCampaignUpdate } from "@/lib/campaigns.functions";
+import { getDonationStatus, MAX_MPESA_AMOUNT, startDonation } from "@/lib/payments.functions";
+import { Check, Smartphone, Share2, X, CircleAlert, Loader2 } from "lucide-react";
 
 const detailQuery = (id: string) =>
   queryOptions({
@@ -70,7 +71,6 @@ export const Route = createFileRoute("/campaign/$id")({
 
 function CampaignDetail() {
   const { id } = Route.useParams();
-  const navigate = useNavigate();
   const { data: campaign } = useSuspenseQuery(detailQuery(id));
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -221,7 +221,11 @@ function CampaignDetail() {
       </div>
 
        <div className="fixed bottom-0 left-1/2 z-30 w-full max-w-[480px] -translate-x-1/2 border-t border-border/60 bg-background/95 px-5 py-4 backdrop-blur-md">
-         {campaign.isAcceptingDonations ? (
+         {campaign.isAcceptingDonations && !campaign.payoutName ? (
+           <div className="rounded-full bg-secondary py-4 text-center font-display text-base font-bold text-secondary-foreground">
+             Donations open soon
+           </div>
+         ) : campaign.isAcceptingDonations ? (
            <button
              onClick={() => setOpen(true)}
              className="w-full rounded-full bg-accent py-4 font-display text-base font-bold text-accent-foreground transition-transform active:scale-[0.98]"
@@ -235,12 +239,8 @@ function CampaignDetail() {
          )}
       </div>
 
-      {open && (
-        <DonateModal
-          campaignId={id}
-          onClose={() => setOpen(false)}
-          onDone={() => navigate({ to: "/campaign/$id", params: { id } })}
-        />
+      {open && campaign.payoutName && (
+        <DonateModal campaignId={id} payoutName={campaign.payoutName} onClose={() => setOpen(false)} />
       )}
     </div>
   );
@@ -291,66 +291,153 @@ function PostUpdate({ campaignId }: { campaignId: string }) {
 
 const quickAmounts = [200, 500, 1000, 5000];
 
+// Safaricom's prompt times out after about a minute; give the callback some slack after that.
+const GIVE_UP_AFTER_MS = 2 * 60 * 1000;
+
+type Phase =
+  | { kind: "form" }
+  | { kind: "sending" }
+  | { kind: "waiting"; requestId: string; startedAt: number }
+  | { kind: "done"; amount: number; receipt: string | null }
+  | { kind: "failed"; message: string }
+  | { kind: "timeout" };
+
 function DonateModal({
   campaignId,
+  payoutName,
   onClose,
 }: {
   campaignId: string;
+  payoutName: string;
   onClose: () => void;
-  onDone: () => void;
 }) {
-  const donate = useServerFn(submitDonation);
+  const start = useServerFn(startDonation);
+  const checkStatus = useServerFn(getDonationStatus);
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState(500);
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [anonymous, setAnonymous] = useState(false);
-  const [status, setStatus] = useState<"idle" | "sending" | "done">("idle");
+  const [phase, setPhase] = useState<Phase>({ kind: "form" });
   const [error, setError] = useState("");
-  const [reference, setReference] = useState("");
+  const polling = useRef(false);
 
   const confirm = async () => {
-    if (amount <= 0) return;
-    setStatus("sending");
+    if (amount <= 0 || amount > MAX_MPESA_AMOUNT) return;
+    setPhase({ kind: "sending" });
     setError("");
     try {
-      const res = await donate({
+      const res = await start({
         data: {
           campaignId,
           amount,
+          phone,
           donorName: anonymous ? "" : name.trim(),
           isAnonymous: anonymous,
         },
       });
-      setReference(res.reference);
-      await queryClient.invalidateQueries({ queryKey: ["campaign", campaignId] });
-      await queryClient.invalidateQueries({ queryKey: ["campaigns", "active"] });
-      setStatus("done");
+      setPhase({ kind: "waiting", requestId: res.requestId, startedAt: Date.now() });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "The donation didn't go through. Please try again.");
-      setStatus("idle");
+      setError(err instanceof Error ? err.message : "We couldn't send the M-Pesa prompt. Try again.");
+      setPhase({ kind: "form" });
     }
   };
+
+  useEffect(() => {
+    if (phase.kind !== "waiting") return;
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || polling.current) return;
+      polling.current = true;
+      try {
+        const res = await checkStatus({ data: { requestId: phase.requestId } });
+        if (cancelled) return;
+        if (res.status === "success") {
+          setPhase({ kind: "done", amount: res.amount, receipt: res.receipt });
+          await queryClient.invalidateQueries({ queryKey: ["campaign", campaignId] });
+          await queryClient.invalidateQueries({ queryKey: ["campaigns", "active"] });
+        } else if (res.status === "failed") {
+          setPhase({ kind: "failed", message: res.message });
+        } else if (Date.now() - phase.startedAt > GIVE_UP_AFTER_MS) {
+          setPhase({ kind: "timeout" });
+        }
+      } catch {
+        // Network blip — keep polling.
+      } finally {
+        polling.current = false;
+      }
+    };
+    const timer = setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [phase, checkStatus, campaignId, queryClient]);
+
+  const busy = phase.kind === "sending" || phase.kind === "waiting";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm">
       <div className="w-full max-w-[480px] rounded-t-3xl border-t border-border bg-background p-5 pb-8">
-        {status === "done" ? (
+        {phase.kind === "done" ? (
           <div className="py-6 text-center">
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary text-primary-foreground">
               <Check className="h-8 w-8" strokeWidth={3} />
             </div>
             <h3 className="mt-4 font-display text-xl font-bold">Asante sana!</h3>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              Your {formatKES(amount)} has been added to this harambee.
+              Your {formatKES(phase.amount)} has been added to this harambee.
             </p>
-            <p className="mt-1 text-[11px] text-muted-foreground">Reference {reference}</p>
+            {phase.receipt && (
+              <p className="mt-1 text-[11px] text-muted-foreground">M-Pesa receipt {phase.receipt}</p>
+            )}
             <button
               onClick={onClose}
               className="mt-6 w-full rounded-full bg-foreground py-3.5 font-display text-sm font-bold text-background"
             >
               Done
             </button>
+          </div>
+        ) : phase.kind === "waiting" ? (
+          <div className="py-6 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-accent/15 text-accent">
+              <Smartphone className="h-8 w-8" />
+            </div>
+            <h3 className="mt-4 font-display text-xl font-bold">Check your phone</h3>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              Enter your M-Pesa PIN to send {formatKES(amount)} to {payoutName}.
+            </p>
+            <p className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for M-Pesa to confirm…
+            </p>
+          </div>
+        ) : phase.kind === "failed" || phase.kind === "timeout" ? (
+          <div className="py-6 text-center">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-flag-red/10 text-flag-red">
+              <CircleAlert className="h-8 w-8" />
+            </div>
+            <h3 className="mt-4 font-display text-xl font-bold">
+              {phase.kind === "failed" ? "Payment not completed" : "Still waiting on M-Pesa"}
+            </h3>
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              {phase.kind === "failed"
+                ? phase.message
+                : "We haven't heard back yet. If you entered your PIN and got an M-Pesa SMS, your donation will appear on this page shortly. Don't pay twice."}
+            </p>
+            <div className="mt-6 flex gap-2">
+              <button
+                onClick={onClose}
+                className="flex-1 rounded-full border border-border py-3.5 font-display text-sm font-bold"
+              >
+                Close
+              </button>
+              <button
+                onClick={() => setPhase({ kind: "form" })}
+                className="flex-1 rounded-full bg-foreground py-3.5 font-display text-sm font-bold text-background"
+              >
+                Try again
+              </button>
+            </div>
           </div>
         ) : (
           <>
@@ -360,12 +447,17 @@ function DonateModal({
                 <X className="h-4 w-4" />
               </button>
             </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Donation for <b className="text-foreground">{payoutName}</b>
+            </p>
 
             <div className="mt-5">
               <label className="text-xs font-semibold text-muted-foreground">Amount (KES)</label>
               <input
                 type="number"
                 inputMode="numeric"
+                min={1}
+                max={MAX_MPESA_AMOUNT}
                 value={amount || ""}
                 onChange={(e) => setAmount(parseInt(e.target.value) || 0)}
                 className="mt-1 w-full rounded-xl border border-input bg-background px-4 py-3 font-display text-xl font-bold outline-none focus:border-primary"
@@ -385,6 +477,11 @@ function DonateModal({
                   </button>
                 ))}
               </div>
+              {amount > MAX_MPESA_AMOUNT && (
+                <p className="mt-2 text-xs text-flag-red">
+                  M-Pesa allows up to {formatKES(MAX_MPESA_AMOUNT)} per transaction.
+                </p>
+              )}
             </div>
 
             <div className="mt-4">
@@ -393,6 +490,7 @@ function DonateModal({
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 inputMode="tel"
+                autoComplete="tel"
                 placeholder="07XX XXX XXX"
                 className="mt-1 w-full rounded-xl border border-input bg-background px-4 py-3 text-base outline-none focus:border-primary"
               />
@@ -424,14 +522,14 @@ function DonateModal({
 
             <button
               onClick={confirm}
-              disabled={status === "sending" || amount <= 0}
+              disabled={busy || amount <= 0 || amount > MAX_MPESA_AMOUNT || phone.trim().length < 9}
               className="mt-5 flex w-full items-center justify-center gap-2 rounded-full bg-accent py-4 font-display text-base font-bold text-accent-foreground disabled:opacity-50"
             >
-              <MessageCircle className="h-4 w-4" />
-              {status === "sending" ? "Confirming…" : `Confirm ${formatKES(amount || 0)}`}
+              <Smartphone className="h-4 w-4" />
+              {phase.kind === "sending" ? "Sending prompt…" : `Send ${formatKES(amount || 0)} prompt`}
             </button>
             <p className="mt-2 text-center text-[11px] text-muted-foreground">
-              Demo mode — no real money moves yet.
+              You'll get an M-Pesa prompt on your phone. Your PIN never touches Harambee.
             </p>
           </>
         )}

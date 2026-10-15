@@ -54,6 +54,8 @@ export type CampaignDetail = Campaign & {
   donors: Donor[];
   updates: CampaignUpdate[];
   donorCount: number;
+  /** Who M-Pesa donations are paid to; null until the organizer sets up payments. */
+  payoutName: string | null;
 };
 
 export const categoryLabel: Record<Category, string> = {
