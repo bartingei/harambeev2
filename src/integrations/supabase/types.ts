@@ -163,6 +163,138 @@ export type Database = {
           },
         ]
       }
+      organizer_payment_settings: {
+        Row: {
+          account_reference: string
+          business_shortcode: string
+          consumer_key_enc: string
+          consumer_secret_enc: string
+          display_name: string
+          owner_id: string
+          passkey_enc: string
+          shortcode_type: string
+          till_number: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_reference?: string
+          business_shortcode: string
+          consumer_key_enc: string
+          consumer_secret_enc: string
+          display_name: string
+          owner_id: string
+          passkey_enc: string
+          shortcode_type: string
+          till_number?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_reference?: string
+          business_shortcode?: string
+          consumer_key_enc?: string
+          consumer_secret_enc?: string
+          display_name?: string
+          owner_id?: string
+          passkey_enc?: string
+          shortcode_type?: string
+          till_number?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organizer_payment_settings_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_requests: {
+        Row: {
+          amount: number
+          campaign_id: string
+          checkout_request_id: string
+          created_at: string
+          donation_id: string | null
+          donor_name: string | null
+          id: string
+          is_anonymous: boolean
+          last_checked_at: string | null
+          merchant_request_id: string | null
+          message: string | null
+          mpesa_receipt: string | null
+          owner_id: string
+          phone: string
+          result_code: number | null
+          result_desc: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          campaign_id: string
+          checkout_request_id: string
+          created_at?: string
+          donation_id?: string | null
+          donor_name?: string | null
+          id?: string
+          is_anonymous?: boolean
+          last_checked_at?: string | null
+          merchant_request_id?: string | null
+          message?: string | null
+          mpesa_receipt?: string | null
+          owner_id: string
+          phone: string
+          result_code?: number | null
+          result_desc?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          campaign_id?: string
+          checkout_request_id?: string
+          created_at?: string
+          donation_id?: string | null
+          donor_name?: string | null
+          id?: string
+          is_anonymous?: boolean
+          last_checked_at?: string | null
+          merchant_request_id?: string | null
+          message?: string | null
+          mpesa_receipt?: string | null
+          owner_id?: string
+          phone?: string
+          result_code?: number | null
+          result_desc?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_requests_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_requests_donation_id_fkey"
+            columns: ["donation_id"]
+            isOneToOne: false
+            referencedRelation: "donations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_requests_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
@@ -232,6 +364,22 @@ export type Database = {
       }
     }
     Functions: {
+      complete_payment_request: {
+        Args: {
+          _amount?: number
+          _checkout_request_id: string
+          _mpesa_receipt?: string
+          _result_code: number
+          _result_desc?: string
+        }
+        Returns: Database["public"]["Tables"]["payment_requests"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "payment_requests"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       record_donation: {
         Args: {
           _amount: number

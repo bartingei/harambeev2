@@ -182,6 +182,17 @@ export const getCampaignDetail = createServerFn({ method: "GET" })
       signPhotos(client, [row.cover_photo, row.organizer_photo]),
     ]);
 
+    let payoutName: string | null = null;
+    if (row.creator_id) {
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const { data: payout } = await supabaseAdmin
+        .from("organizer_payment_settings")
+        .select("display_name")
+        .eq("owner_id", row.creator_id)
+        .maybeSingle();
+      payoutName = payout?.display_name ?? null;
+    }
+
     const mappedUpdates = (updates ?? []).map((u) => ({
       id: u.id,
       content: u.content,
@@ -197,6 +208,7 @@ export const getCampaignDetail = createServerFn({ method: "GET" })
         when: relativeTime(d.created_at ?? ""),
       })),
       updates: mappedUpdates,
+      payoutName,
     };
   });
 
@@ -390,32 +402,4 @@ export const postCampaignUpdate = createServerFn({ method: "POST" })
     });
     if (error) throw new Error(error.message);
     return { ok: true };
-  });
-
-export const submitDonation = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) =>
-    z
-      .object({
-        campaignId: z.string().uuid(),
-        amount: z.number().positive().max(10_000_000),
-        donorName: z.string().trim().max(60).optional().default(""),
-        message: z.string().trim().max(500).optional().default(""),
-        isAnonymous: z.boolean().optional().default(false),
-      })
-      .parse(input),
-  )
-  .handler(async ({ data }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const reference =
-      "DEMO-" + Math.random().toString(36).slice(2, 8).toUpperCase() + Date.now().toString().slice(-4);
-    const { error } = await supabaseAdmin.rpc("record_donation", {
-      _campaign_id: data.campaignId,
-      _amount: data.amount,
-      _donor_name: data.donorName || undefined,
-      _message: data.message || undefined,
-      _is_anonymous: data.isAnonymous || !data.donorName,
-      _mpesa_transaction_id: reference,
-    });
-    if (error) throw new Error(error.message);
-    return { ok: true, reference };
   });

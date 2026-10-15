@@ -5,8 +5,9 @@ import { AppHeader } from "@/components/AppHeader";
 import { ProgressBar } from "@/components/ProgressBar";
 import { formatKES } from "@/lib/campaigns";
 import { closeCampaign, extendCampaign, getOrganizerDashboard } from "@/lib/campaigns.functions";
+import { getPaymentSettings, savePaymentSettings, type PaymentSettingsView } from "@/lib/payments.functions";
 import type { Campaign } from "@/lib/campaigns";
-import { Plus, CalendarPlus, CircleCheck } from "lucide-react";
+import { Plus, CalendarPlus, CircleCheck, Smartphone, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -86,6 +87,8 @@ function Dashboard() {
               <Stat label="Campaigns" value={String(data.campaigns.length)} />
               <Stat label="Donations" value={String(data.donations.length)} />
             </div>
+
+            <PaymentSetup />
 
             <h2 className="mt-8 font-display text-base font-bold">Your campaigns</h2>
             <div className="mt-3 space-y-3">
@@ -247,5 +250,194 @@ function Stat({ label, value }: { label: string; value: string }) {
       <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className="mt-1 font-display text-sm font-bold text-foreground">{value}</p>
     </div>
+  );
+}
+
+function PaymentSetup() {
+  const fetchSettings = useServerFn(getPaymentSettings);
+  const { data: settings } = useQuery({
+    queryKey: ["payment-settings"],
+    queryFn: () => fetchSettings(),
+  });
+  const [editing, setEditing] = useState(false);
+
+  if (!settings) return null;
+
+  return (
+    <section className="mt-6 rounded-2xl border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Smartphone className="h-4 w-4 text-primary" />
+          <h2 className="font-display text-base font-bold">M-Pesa payments</h2>
+        </div>
+        <span
+          className={
+            "rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider " +
+            (settings.configured ? "bg-primary/10 text-primary" : "bg-flag-red/10 text-flag-red")
+          }
+        >
+          {settings.configured ? "Live" : "Not set up"}
+        </span>
+      </div>
+
+      {settings.configured && !editing ? (
+        <>
+          <p className="mt-2 text-sm text-foreground/85">
+            Donations go straight to <b>{settings.displayName}</b> —{" "}
+            {settings.shortcodeType === "till"
+              ? `Till ${settings.tillNumber}`
+              : `Paybill ${settings.businessShortcode}, account ${settings.accountReference}`}
+            .
+          </p>
+          <button
+            onClick={() => setEditing(true)}
+            className="mt-3 rounded-full border border-border px-3 py-2 text-xs font-semibold"
+          >
+            Edit payment details
+          </button>
+        </>
+      ) : (
+        <>
+          {!settings.configured && (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Your campaigns show "Donations open soon" until you connect a Till or Paybill. Harambee
+              never holds your money — donors pay you directly.
+            </p>
+          )}
+          <PaymentSettingsForm settings={settings} onDone={() => setEditing(false)} />
+        </>
+      )}
+    </section>
+  );
+}
+
+function PaymentSettingsForm({
+  settings,
+  onDone,
+}: {
+  settings: PaymentSettingsView;
+  onDone: () => void;
+}) {
+  const save = useServerFn(savePaymentSettings);
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    shortcodeType: settings.shortcodeType,
+    businessShortcode: settings.businessShortcode,
+    tillNumber: settings.tillNumber,
+    accountReference: settings.accountReference,
+    displayName: settings.displayName,
+    consumerKey: "",
+    consumerSecret: "",
+    passkey: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await save({ data: form });
+      await qc.invalidateQueries({ queryKey: ["payment-settings"] });
+      await qc.invalidateQueries({ queryKey: ["campaign"] });
+      toast.success("M-Pesa connected. Your campaigns can take donations now.");
+      onDone();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't save your payment details.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const input =
+    "mt-1 w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-primary";
+  const secretHint = settings.configured ? "Saved — leave blank to keep" : "";
+
+  return (
+    <form onSubmit={submit} className="mt-4 space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        {(["till", "paybill"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setForm((f) => ({ ...f, shortcodeType: t }))}
+            className={
+              "rounded-xl border px-3 py-2.5 text-sm font-semibold " +
+              (form.shortcodeType === t
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border bg-background")
+            }
+          >
+            {t === "till" ? "Till (Buy Goods)" : "Paybill"}
+          </button>
+        ))}
+      </div>
+
+      <label className="block text-xs font-semibold text-muted-foreground">
+        Name donors will see
+        <input value={form.displayName} onChange={set("displayName")} placeholder="e.g. Grace Wanjiru School Fund" className={input} />
+      </label>
+
+      {form.shortcodeType === "till" ? (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block text-xs font-semibold text-muted-foreground">
+            Till number
+            <input value={form.tillNumber} onChange={set("tillNumber")} inputMode="numeric" className={input} />
+          </label>
+          <label className="block text-xs font-semibold text-muted-foreground">
+            Store number
+            <input value={form.businessShortcode} onChange={set("businessShortcode")} inputMode="numeric" className={input} />
+          </label>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block text-xs font-semibold text-muted-foreground">
+            Paybill number
+            <input value={form.businessShortcode} onChange={set("businessShortcode")} inputMode="numeric" className={input} />
+          </label>
+          <label className="block text-xs font-semibold text-muted-foreground">
+            Account number
+            <input value={form.accountReference} onChange={set("accountReference")} maxLength={12} className={input} />
+          </label>
+        </div>
+      )}
+
+      <div className="rounded-xl bg-secondary/60 p-3">
+        <p className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+          <ShieldCheck className="h-3.5 w-3.5 text-primary" /> Daraja API keys (encrypted, never shown)
+        </p>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          From your app on developer.safaricom.co.ke, with M-Pesa Express enabled for this number.
+        </p>
+        <label className="mt-2 block text-xs font-semibold text-muted-foreground">
+          Consumer key
+          <input value={form.consumerKey} onChange={set("consumerKey")} placeholder={secretHint} autoComplete="off" className={input} />
+        </label>
+        <label className="mt-2 block text-xs font-semibold text-muted-foreground">
+          Consumer secret
+          <input type="password" value={form.consumerSecret} onChange={set("consumerSecret")} placeholder={secretHint} autoComplete="off" className={input} />
+        </label>
+        <label className="mt-2 block text-xs font-semibold text-muted-foreground">
+          Passkey
+          <input type="password" value={form.passkey} onChange={set("passkey")} placeholder={secretHint} autoComplete="off" className={input} />
+        </label>
+      </div>
+
+      <div className="flex gap-2">
+        {settings.configured && (
+          <button type="button" onClick={onDone} className="flex-1 rounded-full border border-border py-3 text-sm font-semibold">
+            Cancel
+          </button>
+        )}
+        <button
+          type="submit"
+          disabled={busy}
+          className="flex-1 rounded-full bg-primary py-3 font-display text-sm font-bold text-primary-foreground disabled:opacity-50"
+        >
+          {busy ? "Checking with M-Pesa…" : "Save & connect"}
+        </button>
+      </div>
+    </form>
   );
 }
