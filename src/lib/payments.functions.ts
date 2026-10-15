@@ -10,7 +10,9 @@ export type PaymentSettingsView = {
   configured: boolean;
   tillNumber: string;
   owed: number;
+  processing: number;
   paid: number;
+  minPayout: number;
 };
 
 export type DonationStatus = {
@@ -157,7 +159,7 @@ export const getDonationStatus = createServerFn({ method: "GET" })
               _result_desc: result.resultDesc,
             });
             if (error) throw error;
-            if (settled) req = settled;
+            if (settled?.id) req = settled;
           }
         }
       } catch (err) {
@@ -187,6 +189,8 @@ export const getPaymentSettings = createServerFn({ method: "GET" })
       configured: !!till,
       tillNumber: till ?? "",
       owed: Number(summary?.[0]?.owed ?? 0),
+      processing: Number(summary?.[0]?.processing ?? 0),
+      minPayout: Number(process.env["MPESA_PAYOUT_MIN"] ?? 100) || 100,
       paid: Number(summary?.[0]?.paid ?? 0),
     };
   });
@@ -212,4 +216,23 @@ export const savePaymentSettings = createServerFn({ method: "POST" })
     });
     if (error) throw new Error(error.message);
     return { ok: true };
+  });
+
+export const requestPayout = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }): Promise<{ message: string }> => {
+    const { runPayoutForOwner } = await import("./payouts.server");
+    const out = await runPayoutForOwner(context.userId);
+    switch (out.status) {
+      case "sent":
+        return { message: "Payout requested. It should reach your till within a few minutes." };
+      case "rejected":
+        throw new Error(`M-Pesa couldn't send the payout: ${out.reason}`);
+      case "unknown":
+        throw new Error(
+          "We couldn't confirm the payout. We'll check it before sending anything more.",
+        );
+      default:
+        throw new Error("Nothing to pay out yet, or a payout is already on its way.");
+    }
   });

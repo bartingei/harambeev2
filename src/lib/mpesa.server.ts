@@ -207,3 +207,109 @@ export function safeEqual(a: string, b: string): boolean {
   for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
   return diff === 0;
 }
+
+/** Callback URL on this app, guarded by the shared secret in the path. */
+export function secretUrl(path: string): string {
+  const appUrl = process.env["PUBLIC_APP_URL"];
+  const secret = process.env["MPESA_CALLBACK_SECRET"];
+  if (!appUrl || !secret) {
+    throw new Error("Payments aren't configured: set PUBLIC_APP_URL and MPESA_CALLBACK_SECRET.");
+  }
+  return `${appUrl.replace(/\/$/, "")}${path}/${secret}`;
+}
+
+// --- B2B Buy Goods payouts (Harambee shortcode -> organizer till) ---
+
+export function payoutConfig(): {
+  initiator: string;
+  securityCredential: string;
+  minAmount: number;
+} {
+  const initiator = process.env["MPESA_INITIATOR_NAME"];
+  const securityCredential = process.env["MPESA_SECURITY_CREDENTIAL"];
+  if (!initiator || !securityCredential) {
+    throw new Error(
+      "Payouts aren't configured: set MPESA_INITIATOR_NAME and MPESA_SECURITY_CREDENTIAL.",
+    );
+  }
+  const min = Number(process.env["MPESA_PAYOUT_MIN"] ?? 100);
+  return { initiator, securityCredential, minAmount: Number.isFinite(min) && min >= 1 ? min : 100 };
+}
+
+/** Safaricom answered and refused: nothing was sent, so the payout is safe to retry. */
+export class MpesaRejected extends Error {}
+
+export async function b2bBuyGoods(opts: {
+  creds: MpesaCredentials;
+  shortcode: MpesaShortcode;
+  initiator: string;
+  securityCredential: string;
+  tillNumber: string;
+  amount: number;
+  resultUrl: string;
+  timeoutUrl: string;
+  remarks: string;
+}): Promise<{ originatorConversationId: string; conversationId: string }> {
+  let token: string;
+  try {
+    token = await getAccessToken(opts.creds);
+  } catch (err) {
+    throw new MpesaRejected(
+      err instanceof Error ? err.message : "Couldn't authenticate with M-Pesa.",
+    );
+  }
+  // A thrown fetch here (network/timeout) is deliberately NOT MpesaRejected: the transfer may
+  // have been accepted, so the caller must not retry blindly.
+  const res = await fetch(`${baseUrl()}/mpesa/b2b/v1/paymentrequest`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      Initiator: opts.initiator,
+      SecurityCredential: opts.securityCredential,
+      CommandID: "BusinessBuyGoods",
+      SenderIdentifierType: opts.shortcode.shortcodeType === "till" ? "2" : "4",
+      RecieverIdentifierType: "2",
+      Amount: Math.round(opts.amount),
+      PartyA: opts.shortcode.businessShortcode,
+      PartyB: opts.tillNumber,
+      AccountReference: "Harambee",
+      Remarks: opts.remarks.slice(0, 100),
+      QueueTimeOutURL: opts.timeoutUrl,
+      ResultURL: opts.resultUrl,
+    }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    OriginatorConversationID?: string;
+    ConversationID?: string;
+    ResponseCode?: string;
+    ResponseDescription?: string;
+    errorMessage?: string;
+  };
+  if (res.ok && body.ResponseCode === "0" && body.OriginatorConversationID) {
+    return {
+      originatorConversationId: body.OriginatorConversationID,
+      conversationId: body.ConversationID ?? "",
+    };
+  }
+  const message = body.errorMessage || body.ResponseDescription || `HTTP ${res.status}`;
+  if (res.status >= 500) throw new Error(`M-Pesa error while sending payout: ${message}`);
+  throw new MpesaRejected(message);
+}
+
+export type B2bResult = {
+  originatorConversationId: string;
+  resultCode: number;
+  resultDesc: string;
+  receipt: string | null;
+};
+
+export function parseB2bResult(payload: unknown): B2bResult | null {
+  const r = (payload as { Result?: Record<string, unknown> })?.Result;
+  if (!r || typeof r.OriginatorConversationID !== "string") return null;
+  return {
+    originatorConversationId: r.OriginatorConversationID,
+    resultCode: Number(r.ResultCode),
+    resultDesc: String(r.ResultDesc ?? ""),
+    receipt: typeof r.TransactionID === "string" ? r.TransactionID : null,
+  };
+}

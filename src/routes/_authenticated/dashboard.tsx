@@ -5,7 +5,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { ProgressBar } from "@/components/ProgressBar";
 import { formatKES } from "@/lib/campaigns";
 import { closeCampaign, extendCampaign, getOrganizerDashboard } from "@/lib/campaigns.functions";
-import { getPaymentSettings, savePaymentSettings } from "@/lib/payments.functions";
+import { getPaymentSettings, requestPayout, savePaymentSettings } from "@/lib/payments.functions";
 import type { Campaign } from "@/lib/campaigns";
 import { Plus, CalendarPlus, CircleCheck, Smartphone } from "lucide-react";
 import { useState } from "react";
@@ -256,6 +256,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 function PaymentSetup() {
   const fetchSettings = useServerFn(getPaymentSettings);
   const save = useServerFn(savePaymentSettings);
+  const payout = useServerFn(requestPayout);
   const qc = useQueryClient();
   const { data: settings } = useQuery({
     queryKey: ["payment-settings"],
@@ -267,6 +268,19 @@ function PaymentSetup() {
   if (!settings) return null;
   const value = till ?? settings.tillNumber;
   const dirty = value !== settings.tillNumber;
+
+  const payNow = async () => {
+    setBusy(true);
+    try {
+      const res = await payout();
+      await qc.invalidateQueries({ queryKey: ["payment-settings"] });
+      toast.success(res.message);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't request the payout.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -322,10 +336,25 @@ function PaymentSetup() {
         </button>
       </form>
       {settings.configured && (
-        <p className="mt-3 text-[11px] text-muted-foreground">
-          Waiting to be paid out: <b className="text-foreground">{formatKES(settings.owed)}</b> · Paid out:{" "}
-          <b className="text-foreground">{formatKES(settings.paid)}</b>
-        </p>
+        <div className="mt-3">
+          <p className="text-[11px] text-muted-foreground">
+            Waiting to be paid out: <b className="text-foreground">{formatKES(settings.owed)}</b> · On its way:{" "}
+            <b className="text-foreground">{formatKES(settings.processing)}</b> · Paid out:{" "}
+            <b className="text-foreground">{formatKES(settings.paid)}</b>
+          </p>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            We pay out automatically once at least {formatKES(settings.minPayout)} is waiting.
+          </p>
+          {settings.owed >= settings.minPayout && (
+            <button
+              onClick={payNow}
+              disabled={busy}
+              className="mt-2 rounded-full border border-border px-3 py-2 text-xs font-semibold disabled:opacity-50"
+            >
+              Pay me now
+            </button>
+          )}
+        </div>
       )}
     </section>
   );

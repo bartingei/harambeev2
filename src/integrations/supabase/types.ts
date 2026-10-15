@@ -189,6 +189,51 @@ export type Database = {
           },
         ]
       }
+      payouts: {
+        Row: {
+          amount: number
+          conversation_id: string | null
+          created_at: string
+          id: string
+          originator_conversation_id: string | null
+          owner_id: string
+          receipt: string | null
+          result_code: number | null
+          result_desc: string | null
+          status: string
+          till_number: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          originator_conversation_id?: string | null
+          owner_id: string
+          receipt?: string | null
+          result_code?: number | null
+          result_desc?: string | null
+          status?: string
+          till_number: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          originator_conversation_id?: string | null
+          owner_id?: string
+          receipt?: string | null
+          result_code?: number | null
+          result_desc?: string | null
+          status?: string
+          till_number?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       payment_requests: {
         Row: {
           amount: number
@@ -205,6 +250,7 @@ export type Database = {
           mpesa_receipt: string | null
           owner_id: string
           paid_out_at: string | null
+          payout_id: string | null
           payout_reference: string | null
           payout_status: string
           phone: string
@@ -228,6 +274,7 @@ export type Database = {
           mpesa_receipt?: string | null
           owner_id: string
           paid_out_at?: string | null
+          payout_id?: string | null
           payout_reference?: string | null
           payout_status?: string
           phone: string
@@ -251,6 +298,7 @@ export type Database = {
           mpesa_receipt?: string | null
           owner_id?: string
           paid_out_at?: string | null
+          payout_id?: string | null
           payout_reference?: string | null
           payout_status?: string
           phone?: string
@@ -352,9 +400,38 @@ export type Database = {
       }
     }
     Functions: {
+      claim_payout: {
+        Args: { _min: number; _owner: string }
+        Returns: Database["public"]["Tables"]["payouts"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "payouts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      complete_payout: {
+        Args: {
+          _originator: string
+          _receipt?: string
+          _result_code: number
+          _result_desc?: string
+        }
+        Returns: Database["public"]["Tables"]["payouts"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "payouts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      release_unsent_payout: {
+        Args: { _payout: string; _reason?: string }
+        Returns: undefined
+      }
       my_payout_summary: {
         Args: Record<PropertyKey, never>
-        Returns: { owed: number; paid: number }[]
+        Returns: { owed: number; processing: number; paid: number }[]
       }
       complete_payment_request: {
         Args: {
