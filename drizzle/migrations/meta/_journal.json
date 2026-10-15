@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789706675089,
+      "tag": "0000_add_organizer_photo",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789805255213,
+      "tag": "0001_secure_donations_and_record_donation",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790232986400,
+      "tag": "0002_campaign_expiry_lifecycle",
+      "breakpoints": true
+    }
+  ]
+}
