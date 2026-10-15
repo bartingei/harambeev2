@@ -165,39 +165,18 @@ export type Database = {
       }
       organizer_payment_settings: {
         Row: {
-          account_reference: string
-          business_shortcode: string
-          consumer_key_enc: string
-          consumer_secret_enc: string
-          display_name: string
           owner_id: string
-          passkey_enc: string
-          shortcode_type: string
-          till_number: string | null
+          till_number: string
           updated_at: string
         }
         Insert: {
-          account_reference?: string
-          business_shortcode: string
-          consumer_key_enc: string
-          consumer_secret_enc: string
-          display_name: string
           owner_id: string
-          passkey_enc: string
-          shortcode_type: string
-          till_number?: string | null
+          till_number: string
           updated_at?: string
         }
         Update: {
-          account_reference?: string
-          business_shortcode?: string
-          consumer_key_enc?: string
-          consumer_secret_enc?: string
-          display_name?: string
           owner_id?: string
-          passkey_enc?: string
-          shortcode_type?: string
-          till_number?: string | null
+          till_number?: string
           updated_at?: string
         }
         Relationships: [
@@ -225,6 +204,9 @@ export type Database = {
           message: string | null
           mpesa_receipt: string | null
           owner_id: string
+          paid_out_at: string | null
+          payout_reference: string | null
+          payout_status: string
           phone: string
           result_code: number | null
           result_desc: string | null
@@ -245,6 +227,9 @@ export type Database = {
           message?: string | null
           mpesa_receipt?: string | null
           owner_id: string
+          paid_out_at?: string | null
+          payout_reference?: string | null
+          payout_status?: string
           phone: string
           result_code?: number | null
           result_desc?: string | null
@@ -265,6 +250,9 @@ export type Database = {
           message?: string | null
           mpesa_receipt?: string | null
           owner_id?: string
+          paid_out_at?: string | null
+          payout_reference?: string | null
+          payout_status?: string
           phone?: string
           result_code?: number | null
           result_desc?: string | null
@@ -364,6 +352,10 @@ export type Database = {
       }
     }
     Functions: {
+      my_payout_summary: {
+        Args: Record<PropertyKey, never>
+        Returns: { owed: number; paid: number }[]
+      }
       complete_payment_request: {
         Args: {
           _amount?: number

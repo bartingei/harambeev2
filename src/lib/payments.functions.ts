@@ -8,12 +8,9 @@ export const MAX_MPESA_AMOUNT = 250_000;
 
 export type PaymentSettingsView = {
   configured: boolean;
-  shortcodeType: "till" | "paybill";
-  businessShortcode: string;
   tillNumber: string;
-  accountReference: string;
-  displayName: string;
-  updatedAt: string | null;
+  owed: number;
+  paid: number;
 };
 
 export type DonationStatus = {
@@ -23,30 +20,14 @@ export type DonationStatus = {
   message: string;
 };
 
-async function loadOrganizerMpesa(ownerId: string) {
+async function organizerTill(ownerId: string): Promise<string | null> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const mpesa = await import("./mpesa.server");
-  const { data: row } = await supabaseAdmin
+  const { data } = await supabaseAdmin
     .from("organizer_payment_settings")
-    .select("*")
+    .select("till_number")
     .eq("owner_id", ownerId)
     .maybeSingle();
-  if (!row) return null;
-  const [consumerKey, consumerSecret, passkey] = await Promise.all([
-    mpesa.decryptSecret(row.consumer_key_enc),
-    mpesa.decryptSecret(row.consumer_secret_enc),
-    mpesa.decryptSecret(row.passkey_enc),
-  ]);
-  return {
-    creds: { consumerKey, consumerSecret, passkey },
-    shortcode: {
-      shortcodeType: row.shortcode_type as "till" | "paybill",
-      businessShortcode: row.business_shortcode,
-      tillNumber: row.till_number,
-      accountReference: row.account_reference,
-    },
-    displayName: row.display_name,
-  };
+  return data?.till_number ?? null;
 }
 
 /** Human-readable outcome for Daraja result codes donors commonly hit. */
@@ -95,10 +76,10 @@ export const startDonation = createServerFn({ method: "POST" })
     if (!campaign || !campaignLifecycle(campaign.deadline, campaign.status).isAcceptingDonations) {
       throw new Error("This campaign isn't accepting donations.");
     }
-    const organizer = campaign.creator_id ? await loadOrganizerMpesa(campaign.creator_id) : null;
-    if (!campaign.creator_id || !organizer) {
-      throw new Error("This organizer hasn't finished setting up M-Pesa yet.");
+    if (!campaign.creator_id || !(await organizerTill(campaign.creator_id))) {
+      throw new Error("This organizer hasn't added their till number yet.");
     }
+    const platform = mpesa.platformMpesa();
 
     // Stop one number being flooded with prompts.
     const since = new Date(Date.now() - 2 * 60 * 1000).toISOString();
@@ -112,8 +93,7 @@ export const startDonation = createServerFn({ method: "POST" })
     }
 
     const push = await mpesa.stkPush({
-      creds: organizer.creds,
-      shortcode: organizer.shortcode,
+      ...platform,
       phone,
       amount: data.amount,
       callbackUrl: mpesa.callbackUrl(),
@@ -164,12 +144,10 @@ export const getDonationStatus = createServerFn({ method: "GET" })
         .update({ last_checked_at: new Date().toISOString() })
         .eq("id", req.id);
       try {
-        const organizer = await loadOrganizerMpesa(req.owner_id);
-        if (organizer) {
+        {
           const mpesa = await import("./mpesa.server");
           const result = await mpesa.stkQuery({
-            creds: organizer.creds,
-            shortcode: organizer.shortcode,
+            ...mpesa.platformMpesa(),
             checkoutRequestId: req.checkout_request_id,
           });
           if (result) {
@@ -203,87 +181,33 @@ export const getDonationStatus = createServerFn({ method: "GET" })
 export const getPaymentSettings = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }): Promise<PaymentSettingsView> => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: row } = await supabaseAdmin
-      .from("organizer_payment_settings")
-      .select(
-        "shortcode_type, business_shortcode, till_number, account_reference, display_name, updated_at",
-      )
-      .eq("owner_id", context.userId)
-      .maybeSingle();
+    const till = await organizerTill(context.userId);
+    const { data: summary } = await context.supabase.rpc("my_payout_summary");
     return {
-      configured: !!row,
-      shortcodeType: (row?.shortcode_type as "till" | "paybill") ?? "till",
-      businessShortcode: row?.business_shortcode ?? "",
-      tillNumber: row?.till_number ?? "",
-      accountReference: row?.account_reference ?? "Harambee",
-      displayName: row?.display_name ?? "",
-      updatedAt: row?.updated_at ?? null,
+      configured: !!till,
+      tillNumber: till ?? "",
+      owed: Number(summary?.[0]?.owed ?? 0),
+      paid: Number(summary?.[0]?.paid ?? 0),
     };
   });
-
-const shortcode = z
-  .string()
-  .trim()
-  .regex(/^\d{5,8}$/, "Use the 5–8 digit number from Safaricom.");
 
 export const savePaymentSettings = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
     z
       .object({
-        shortcodeType: z.enum(["till", "paybill"]),
-        businessShortcode: shortcode,
-        tillNumber: z.string().trim().optional().default(""),
-        accountReference: z.string().trim().min(1).max(12),
-        displayName: z.string().trim().min(2).max(80),
-        // Blank means "keep what's saved".
-        consumerKey: z.string().trim().max(200).optional().default(""),
-        consumerSecret: z.string().trim().max(200).optional().default(""),
-        passkey: z.string().trim().max(200).optional().default(""),
-      })
-      .superRefine((v, ctx) => {
-        if (v.shortcodeType === "till" && !shortcode.safeParse(v.tillNumber).success) {
-          ctx.addIssue({
-            code: "custom",
-            path: ["tillNumber"],
-            message: "Enter your till number.",
-          });
-        }
+        tillNumber: z
+          .string()
+          .trim()
+          .regex(/^\d{5,8}$/, "A Buy Goods till number is 5–8 digits."),
       })
       .parse(input),
   )
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const mpesa = await import("./mpesa.server");
-    const existing = await loadOrganizerMpesa(context.userId);
-
-    const creds = {
-      consumerKey: data.consumerKey || existing?.creds.consumerKey || "",
-      consumerSecret: data.consumerSecret || existing?.creds.consumerSecret || "",
-      passkey: data.passkey || existing?.creds.passkey || "",
-    };
-    if (!creds.consumerKey || !creds.consumerSecret || !creds.passkey) {
-      throw new Error("Enter your Daraja consumer key, consumer secret and passkey.");
-    }
-    // Fails fast on a typo'd key/secret instead of on a donor's first payment.
-    await mpesa.getAccessToken(creds);
-
-    const [consumerKeyEnc, consumerSecretEnc, passkeyEnc] = await Promise.all([
-      mpesa.encryptSecret(creds.consumerKey),
-      mpesa.encryptSecret(creds.consumerSecret),
-      mpesa.encryptSecret(creds.passkey),
-    ]);
     const { error } = await supabaseAdmin.from("organizer_payment_settings").upsert({
       owner_id: context.userId,
-      shortcode_type: data.shortcodeType,
-      business_shortcode: data.businessShortcode,
-      till_number: data.shortcodeType === "till" ? data.tillNumber : null,
-      account_reference: data.accountReference,
-      display_name: data.displayName,
-      consumer_key_enc: consumerKeyEnc,
-      consumer_secret_enc: consumerSecretEnc,
-      passkey_enc: passkeyEnc,
+      till_number: data.tillNumber,
       updated_at: new Date().toISOString(),
     });
     if (error) throw new Error(error.message);

@@ -187,10 +187,10 @@ export const getCampaignDetail = createServerFn({ method: "GET" })
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
       const { data: payout } = await supabaseAdmin
         .from("organizer_payment_settings")
-        .select("display_name")
+        .select("till_number")
         .eq("owner_id", row.creator_id)
         .maybeSingle();
-      payoutName = payout?.display_name ?? null;
+      payoutName = payout ? row.organizer_name : null;
     }
 
     const mappedUpdates = (updates ?? []).map((u) => ({

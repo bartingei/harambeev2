@@ -39,32 +39,36 @@ npm run dev
 
 ## M-Pesa payments (Daraja STK Push)
 
-Donors pay with an M-Pesa prompt on their phone. The money goes **straight to the organizer's own Till or Paybill** — Harambee never holds funds. It only records payments Safaricom confirms, so the "raised" counter is real money.
+Donors pay with an M-Pesa prompt on their phone. **Organizers only enter their Buy Goods till number** (Dashboard → Where donations go).
 
 ### How it works
 
-1. Organizers connect M-Pesa once, under **Dashboard → M-Pesa payments**: Till (Buy Goods) or Paybill, the name donors see, and their Daraja consumer key, consumer secret and passkey. The keys are checked against Safaricom on save, then encrypted with AES-256-GCM. Only the server can read them.
-2. Campaigns whose organizer hasn't connected M-Pesa show **"Donations open soon"**.
-3. A donor enters an amount and phone number. `startDonation` sends an STK push and saves a `payment_requests` row.
-4. Safaricom posts the result to `/api/public/mpesa/callback/<MPESA_CALLBACK_SECRET>`. `complete_payment_request` settles the request exactly once: it records the donation with its M-Pesa receipt and bumps the campaign total.
-5. The donor's screen polls `getDonationStatus`. If the callback is late or lost, it falls back to Daraja's STK status query.
+1. Harambee collects every donation with its own Daraja account (credentials in server env). An STK push can't target an arbitrary till, only ones under the collecting business's own credentials.
+2. A donor enters an amount and phone number. `startDonation` sends the prompt and saves a `payment_requests` row.
+3. Safaricom posts the result to `/api/public/mpesa/callback/<MPESA_CALLBACK_SECRET>`. `complete_payment_request` settles it exactly once: it records the donation with its M-Pesa receipt and raises the campaign total. If the callback is late or lost, polling falls back to Daraja's STK status query.
+4. Each confirmed payment is owed to the organizer's till (`payment_requests.payout_status = 'pending'`). The dashboard shows "waiting to be paid out" and "paid out".
+5. Campaigns whose organizer hasn't added a till show "Donations open soon".
+
+### Paying out to organizers
+
+Payouts to organizers' tills are not automated yet. Until they are, pay the owed amount to each till manually and mark the rows `paid` (set `payout_status`, `payout_reference`, `paid_out_at`). Automating it means Daraja's B2B (BusinessBuyGoods) API, which needs an initiator name and security credential from Safaricom.
 
 ### Server environment variables
 
 | Variable | Value |
 | --- | --- |
-| `SUPABASE_SERVICE_ROLE_KEY` | Already used by the app (Lovable Cloud sets it) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Already used by the app |
 | `MPESA_ENV` | `sandbox` (default) or `production` |
-| `MPESA_ENCRYPTION_KEY` | 32 random bytes, base64: `openssl rand -base64 32`. Don't change it once organizers have saved keys. |
+| `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET` | From your Daraja app |
+| `MPESA_SHORTCODE` | Harambee's collection shortcode (the one the passkey belongs to) |
+| `MPESA_SHORTCODE_TYPE` | `paybill` (default) or `till` |
+| `MPESA_TILL_NUMBER` | Only if type is `till` and differs from the shortcode |
+| `MPESA_PASSKEY` | Lipa Na M-Pesa passkey for that shortcode |
 | `MPESA_CALLBACK_SECRET` | Long random URL-safe string: `openssl rand -hex 24` |
 | `PUBLIC_APP_URL` | Public HTTPS origin Safaricom can reach, e.g. `https://harambeeyetu.lovable.app` |
 
-Apply `supabase/migrations/20261015120000_mpesa_stk_payments.sql` to the database.
+Apply both `supabase/migrations/2026101512*` and `2026101513*` to the database.
 
 ### Testing in the sandbox
 
-1. Create an app at [developer.safaricom.co.ke](https://developer.safaricom.co.ke) with **M-Pesa Express** and copy its consumer key and secret.
-2. In the dashboard choose **Paybill** and enter shortcode `174379`, any account number, and the sandbox passkey from the Daraja M-Pesa Express simulator page.
-3. Donate to one of your campaigns using the sandbox test number shown on the Daraja portal. Then check three cases: success, cancelling the prompt, and ignoring it until it times out. The total should go up only on success.
-
-Going live means `MPESA_ENV=production`, plus each organizer's production Daraja app for their own shortcode.
+Use shortcode `174379` with the sandbox passkey from the Daraja M-Pesa Express simulator, `MPESA_ENV=sandbox`, and Safaricom's test number. Check success, a cancelled prompt and a timeout: the total should rise only on success.

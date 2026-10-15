@@ -448,7 +448,7 @@ function DonateModal({
               </button>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Payments go to <b className="text-foreground">{payoutName}</b>
+              Donation for <b className="text-foreground">{payoutName}</b>
             </p>
 
             <div className="mt-5">

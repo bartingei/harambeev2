@@ -9,10 +9,36 @@ export type MpesaCredentials = {
 
 export type MpesaShortcode = {
   shortcodeType: "till" | "paybill";
+  /** The shortcode the passkey belongs to (store number for a till). */
   businessShortcode: string;
+  /** Buy Goods only: the till that receives the money. */
   tillNumber: string | null;
   accountReference: string;
 };
+
+/** Harambee's own Daraja account, which collects every donation. */
+export function platformMpesa(): { creds: MpesaCredentials; shortcode: MpesaShortcode } {
+  const env = process.env;
+  const consumerKey = env["MPESA_CONSUMER_KEY"];
+  const consumerSecret = env["MPESA_CONSUMER_SECRET"];
+  const passkey = env["MPESA_PASSKEY"];
+  const businessShortcode = env["MPESA_SHORTCODE"];
+  if (!consumerKey || !consumerSecret || !passkey || !businessShortcode) {
+    throw new Error(
+      "Payments aren't configured: set MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_PASSKEY and MPESA_SHORTCODE.",
+    );
+  }
+  const shortcodeType = env["MPESA_SHORTCODE_TYPE"] === "till" ? "till" : "paybill";
+  return {
+    creds: { consumerKey, consumerSecret, passkey },
+    shortcode: {
+      shortcodeType,
+      businessShortcode,
+      tillNumber: shortcodeType === "till" ? (env["MPESA_TILL_NUMBER"] ?? businessShortcode) : null,
+      accountReference: "Harambee",
+    },
+  };
+}
 
 function baseUrl(): string {
   return process.env["MPESA_ENV"] === "production"
@@ -180,39 +206,4 @@ export function safeEqual(a: string, b: string): boolean {
   let diff = x.length ^ y.length;
   for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
   return diff === 0;
-}
-
-// --- Secret encryption (AES-256-GCM, key from MPESA_ENCRYPTION_KEY as 32 bytes base64) ---
-
-async function encryptionKey(): Promise<CryptoKey> {
-  const raw = process.env["MPESA_ENCRYPTION_KEY"];
-  if (!raw) throw new Error("Payments aren't configured: set MPESA_ENCRYPTION_KEY.");
-  const bytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0));
-  if (bytes.length !== 32)
-    throw new Error("MPESA_ENCRYPTION_KEY must be 32 bytes, base64-encoded.");
-  return crypto.subtle.importKey("raw", bytes, "AES-GCM", false, ["encrypt", "decrypt"]);
-}
-
-const toB64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
-const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-
-export async function encryptSecret(plain: string): Promise<string> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const cipher = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    await encryptionKey(),
-    new TextEncoder().encode(plain),
-  );
-  return `${toB64(iv)}.${toB64(new Uint8Array(cipher))}`;
-}
-
-export async function decryptSecret(stored: string): Promise<string> {
-  const [iv, data] = stored.split(".");
-  if (!iv || !data) throw new Error("Stored M-Pesa secret is corrupt.");
-  const plain = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: fromB64(iv) },
-    await encryptionKey(),
-    fromB64(data),
-  );
-  return new TextDecoder().decode(plain);
 }
